@@ -154,7 +154,7 @@
             this.majinMaleMAMToolStripMenuItem,
             this.majinFemaleMAFToolStripMenuItem});
             this.revertBscToolStripMenuItem.Name = "revertBscToolStripMenuItem";
-            this.revertBscToolStripMenuItem.Size = new System.Drawing.Size(152, 22);
+            this.revertBscToolStripMenuItem.Size = new System.Drawing.Size(128, 22);
             this.revertBscToolStripMenuItem.Text = "Revert Bsc";
             // 
             // allToolStripMenuItem
@@ -273,7 +273,8 @@
             "Top",
             "Bottom",
             "Hands",
-            "Feet"});
+            "Feet",
+            "Accessory"});
             this.lstchkType.Location = new System.Drawing.Point(125, 231);
             this.lstchkType.Name = "lstchkType";
             this.lstchkType.Size = new System.Drawing.Size(115, 124);

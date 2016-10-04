@@ -139,118 +139,109 @@ namespace XVCostumeTool
             int id = (int)lstID.SelectedItem;
             int tID = int.Parse(txtTID.Text);
             BinaryReader br = new BinaryReader(File.Open("CAC_Backups/" + bcs + ".bcs", FileMode.Open));
-            BinaryWriter bw = new BinaryWriter(File.Open(CharFolder + "/" + bcs + "/" + bcs + ".bcs", FileMode.Open));
+            BinaryWriter bw = new BinaryWriter(File.Open(CharFolder + "/" + bcs + "/" + bcs + ".bcs", FileMode.Open,FileAccess.Write));
 
-            //find address and length of section
-            br.BaseStream.Seek(72 + (int.Parse(txtTID.Text) * 4), SeekOrigin.Begin);
+            //find the address used by the template 
+            br.BaseStream.Seek(72 + (tID * 4), SeekOrigin.Begin);
+            int TemplateAddress = br.ReadInt32();
 
-            // get address where data starts
-            int address = br.ReadInt32(); 
+            //write new data location
+            bw.BaseStream.Seek(0, SeekOrigin.End);
+            int NewAddress = (int)bw.BaseStream.Position;
+            bw.BaseStream.Seek(72 + (id * 4), SeekOrigin.Begin);
+            bw.Write(NewAddress);
 
-            //determine length by finding the difference of id using as template and next id in with a proper address.
-            int address2;
-            while(true) 
+            //determine size of template using the next costume sets data.
+            int Address;
+            while (true)
             {
-                address2 = br.ReadInt32();
-                if (address2 != 0)
+                Address = br.ReadInt32();
+                if (Address != 0)
                     break;
             }
 
-            int size = address2 - address;
+            int TemplateSize = Address - TemplateAddress;
 
-            //write data to end of file.
-            bw.BaseStream.Seek(72 + (id * 4), SeekOrigin.Begin);
-            bw.Write((int)bw.BaseStream.Length);
-
-            br.BaseStream.Seek(address, SeekOrigin.Begin);
+            //copy the data onto end of bcs from templates data set.
+            br.BaseStream.Seek(TemplateAddress, SeekOrigin.Begin);
+            byte[] data = br.ReadBytes(TemplateSize);
             bw.BaseStream.Seek(0, SeekOrigin.End);
-            bw.Write(br.ReadBytes(size));
-           
+            bw.Write(data);
 
-            br.BaseStream.Seek(address + 32, SeekOrigin.Begin);
 
+            //change id and adjust for text
             for (int i = 0; i < 10; i++)
             {
-                
-                address2 = br.ReadInt32();
-
-                //apply id
-                if (address2 != 0)
+                br.BaseStream.Seek(TemplateAddress + 32 + (i * 4), SeekOrigin.Begin);
+                int SubAddress = br.ReadInt32();
+                if (SubAddress != 0)
                 {
-                    bw.BaseStream.Seek(-size, SeekOrigin.End);
-                    bw.BaseStream.Seek(address2, SeekOrigin.Current);
+                    //adjust id
+                    bw.BaseStream.Seek(NewAddress + SubAddress, SeekOrigin.Begin);
                     bw.Write((Int16)id);
                     bw.Write((Int16)id);
 
+                    //handle text - head to position of addresses of the text
+                    short check = 0;
 
-                    //adjust addresses
-                    int rAddress, sSize;
-                    if (i != 9)
+                    br.BaseStream.Seek(TemplateAddress + SubAddress + 74,SeekOrigin.Begin);
+                    check = br.ReadInt16();
+                    
+                    if (check == 1) 
                     {
-                        rAddress = (int)br.BaseStream.Position;
-                        int address3 = br.ReadInt32();
-                        sSize = address3 - address2;
-                    }
-                    else
-                    {
-                        rAddress = (int)br.BaseStream.Position;
-                        sSize = size - address2;
-                    }
-
-
-
-                    bw.BaseStream.Seek(-size, SeekOrigin.End);
-                    int wStart = (int)bw.BaseStream.Position;
-
-                    for (int j = 0; j < 6; j++)
-                    {
-                        bw.BaseStream.Seek(wStart, SeekOrigin.Begin);
-                        bw.BaseStream.Seek(address2 + sSize - 24, SeekOrigin.Current);
-                        br.BaseStream.Seek(address + address2 + sSize - 24, SeekOrigin.Begin);
-
-                        br.BaseStream.Seek(j * 4, SeekOrigin.Current);
-                        bw.BaseStream.Seek(j * 4, SeekOrigin.Current);
-                        int wordPos = br.ReadInt32();
-
-                        if (wordPos != 0)
+                        int[] RTAddresses = new int[6]; //read text addresses
+                        br.BaseStream.Seek(TemplateAddress + SubAddress + 120, SeekOrigin.Begin);
+                        for (int j = 0; j < 6; j++)
                         {
+                            RTAddresses[j] = br.ReadInt32();
                             
-                            br.BaseStream.Seek(address + address2 + wordPos + 80, SeekOrigin.Begin);
-                            List<byte> wordbytes = new List<byte>();
-                            while (true)
-                            {
-                                wordbytes.Add(br.ReadByte());
-                                if (wordbytes[wordbytes.Count - 1] == 0x00)
-                                    break;
-                            }
-
-                            br.BaseStream.Seek(address + address2 + wordPos + 80, SeekOrigin.Begin);
-                            string text = Encoding.ASCII.GetString(br.ReadBytes(wordbytes.Count));
-                            text.Replace(tID.ToString("000"), id.ToString("000"));
-
-
-                            int rAddress4 = (int)bw.BaseStream.Position; //write position
-                            bw.BaseStream.Seek(0, SeekOrigin.End);
-                            int writeAddress = (int)bw.BaseStream.Position;
-                            bw.Write(Encoding.ASCII.GetBytes(text));
-                            bw.BaseStream.Seek(rAddress4, SeekOrigin.Begin);
-                            bw.Write(writeAddress - (wStart + address2 + 80));
-
-                            //bw.Write((address + address2 + wordPos) - (wStart + address2) - 4);
                         }
-                        else
-                            bw.Write((int)0);
 
+                        int[] WTAddresses = new int[6]; //write text addresses
 
+                        for (int j = 0; j < 6; j++) 
+                        {
+                            if (RTAddresses[j] != 0)
+                            {
+                                br.BaseStream.Seek(TemplateAddress + SubAddress + 80 + RTAddresses[j], SeekOrigin.Begin);
+                                List<byte> byteData = new List<byte>();
+                                while (true)
+                                {
+                                    byteData.Add(br.ReadByte());
+                                    if (byteData[byteData.Count - 1] == 0x00)
+                                        break;
+
+                                }
+
+                                string text = Encoding.ASCII.GetString(byteData.ToArray());
+                                text.Replace(tID.ToString("000"), id.ToString("000"));
+                                
+                                bw.BaseStream.Seek(0, SeekOrigin.End);
+                                WTAddresses[j] = (int)bw.BaseStream.Position;
+                                bw.Write(Encoding.ASCII.GetBytes(text));
+                            }
+                        }
+
+                        //write text positions
+                        int textAddresses = NewAddress + SubAddress + 80;
+                        bw.BaseStream.Seek(NewAddress + SubAddress + 120,SeekOrigin.Begin);
+                        for (int j = 0; j < 6; j++)
+                        {
+                            if (RTAddresses[j] != 0)
+                                bw.Write(WTAddresses[j] - textAddresses);
+                            else
+                                bw.Write((int)0);
+                        }
                     }
-
-                    br.BaseStream.Seek(rAddress, SeekOrigin.Begin);
                 }
             }
 
+           
             br.Close();
             bw.Close();
         }
+
+        
 
         private void btnWork_Click_1(object sender, EventArgs e)
         {
@@ -278,76 +269,140 @@ namespace XVCostumeTool
             if (txtName.Text != "")
             {
                 int nID, dID;
-                msg Names = msgStream.Load2(msgFolder + "/proper_noun_costume_name_" + lang + ".msg");
-                msgData[] Expand = new msgData[Names.data.Length + 1];
-                Array.Copy(Names.data, Expand, Names.data.Length);
-                Expand[Expand.Length - 1].NameID = "wear_cmn_" + Names.data.Length.ToString("000");
-                nID = Names.data.Length;
-                Expand[Expand.Length - 1].ID = Names.data.Length;
-                Expand[Expand.Length - 1].Lines = new string[] { txtName.Text };
-                Names.data = Expand;
-                msgStream.Save(Names, msgFolder + "/proper_noun_costume_name_" + lang + ".msg");
-
-                msg Descs = msgStream.Load2(msgFolder + "/proper_noun_costume_info_" + lang + ".msg");
-                Expand = new msgData[Descs.data.Length + 1];
-                Array.Copy(Descs.data, Expand, Descs.data.Length);
-                Expand[Expand.Length - 1].NameID = "wear_cmn_" + Descs.data.Length.ToString("000");
-                dID = Descs.data.Length;
-                Expand[Expand.Length - 1].ID = Descs.data.Length;
-                Expand[Expand.Length - 1].Lines = new string[] { txtDesc.Text };
-                Descs.data = Expand;
-                msgStream.Save(Descs, msgFolder + "/proper_noun_costume_info_" + lang + ".msg");
-
-                //scan idb files for next highest idb id
-                string[] items = { "top", "bottom", "gloves", "shoes" };
-                int idbID = 0;
-                for (int i = 0; i < 4; i++)
+                if (lstchkType.GetItemCheckState(0) == CheckState.Checked || lstchkType.GetItemCheckState(1) == CheckState.Checked || lstchkType.GetItemCheckState(2) == CheckState.Checked || lstchkType.GetItemCheckState(3) == CheckState.Checked)
                 {
-                    BinaryReader br = new BinaryReader(File.Open(sysFolder + "/item/costume_" + items[i] + "_item.idb", FileMode.Open));
-                    br.BaseStream.Seek(-640, SeekOrigin.End);
-                    int id = br.ReadInt16();
-                    if (idbID < id)
-                        idbID = id;
-                    br.Close();
+                    msg Names = msgStream.Load2(msgFolder + "/proper_noun_costume_name_" + lang + ".msg");
+                    msgData[] Expand = new msgData[Names.data.Length + 1];
+                    Array.Copy(Names.data, Expand, Names.data.Length);
+                    Expand[Expand.Length - 1].NameID = "wear_cmn_" + Names.data.Length.ToString("000");
+                    nID = Names.data.Length;
+                    Expand[Expand.Length - 1].ID = Names.data.Length;
+                    Expand[Expand.Length - 1].Lines = new string[] { txtName.Text };
+                    Names.data = Expand;
+                    msgStream.Save(Names, msgFolder + "/proper_noun_costume_name_" + lang + ".msg");
+
+                    msg Descs = msgStream.Load2(msgFolder + "/proper_noun_costume_info_" + lang + ".msg");
+                    Expand = new msgData[Descs.data.Length + 1];
+                    Array.Copy(Descs.data, Expand, Descs.data.Length);
+                    Expand[Expand.Length - 1].NameID = "wear_cmn_" + Descs.data.Length.ToString("000");
+                    dID = Descs.data.Length;
+                    Expand[Expand.Length - 1].ID = Descs.data.Length;
+                    Expand[Expand.Length - 1].Lines = new string[] { txtDesc.Text };
+                    Descs.data = Expand;
+                    msgStream.Save(Descs, msgFolder + "/proper_noun_costume_info_" + lang + ".msg");
+
+                    //scan idb files for next highest idb id
+                    string[] items = { "top", "bottom", "gloves", "shoes" };
+                    int idbID = 0;
+                    for (int i = 0; i < 4; i++)
+                    {
+                        BinaryReader br = new BinaryReader(File.Open(sysFolder + "/item/costume_" + items[i] + "_item.idb", FileMode.Open));
+                        br.BaseStream.Seek(-640, SeekOrigin.End);
+                        int id = br.ReadInt16();
+                        if (idbID < id)
+                            idbID = id;
+                        br.Close();
+                    }
+
+                    for (int i = 0; i < 4; i++)
+                    {
+                        if (lstchkType.GetItemCheckState(0) == CheckState.Checked)
+                        {
+                            BinaryReader br = new BinaryReader(File.Open(sysFolder + "/item/costume_" + items[i] + "_item.idb", FileMode.Open));
+                            br.BaseStream.Seek(-640, SeekOrigin.End);
+                            byte[] idbData = br.ReadBytes(640);
+                            br.Close();
+
+                            FileInfo info = new FileInfo(sysFolder + "/item/costume_" + items[i] + "_item.idb");
+                            int count = ((int)info.Length - 16) / 640;
+
+
+                            BinaryWriter bw = new BinaryWriter(File.Open(sysFolder + "/item/costume_" + items[i] + "_item.idb", FileMode.Open));
+                            bw.BaseStream.Seek(0, SeekOrigin.End);
+                            bw.Write(idbData);
+                            bw.BaseStream.Seek(-640, SeekOrigin.End);
+                            bw.Write((Int16)(idbID + 1));
+                            bw.BaseStream.Seek(2, SeekOrigin.Current);
+
+                            bw.Write((Int16)nID);
+                            bw.Write((Int16)dID);
+
+                            bw.BaseStream.Seek(8, SeekOrigin.Current);
+                            bw.Write(int.Parse(txtBuy.Text));
+                            bw.Write(int.Parse(txtSell.Text));
+                            bw.Write(getRaceLock());
+                            bw.BaseStream.Seek(8, SeekOrigin.Current);
+                            for (int j = 0; j < 25; j++)
+                                bw.Write((float)1);
+
+                            bw.BaseStream.Seek(476, SeekOrigin.Current);
+                            bw.Write((int)lstID.SelectedItem);
+                            bw.BaseStream.Seek(8, SeekOrigin.Begin);
+                            bw.Write(count + 1);
+                            bw.Close();
+                        }
+
+                    }
                 }
 
-                for (int i = 0; i < 4; i++)
+                // accesssories
+                if (lstchkType.GetItemCheckState(4) == CheckState.Checked)
                 {
-                    if (lstchkType.GetItemCheckState(0) == CheckState.Checked)
-                    {
-                        BinaryReader br = new BinaryReader(File.Open(sysFolder + "/item/costume_" + items[i] +"_item.idb", FileMode.Open));
-                        br.BaseStream.Seek(-640, SeekOrigin.End);
-                        byte[] idbData = br.ReadBytes(640);
-                        br.Close();
+                    msg Names = msgStream.Load2(msgFolder + "/proper_noun_accessory_name_" + lang + ".msg");
+                    msgData[] Expand = new msgData[Names.data.Length + 1];
+                    Array.Copy(Names.data, Expand, Names.data.Length);
+                    Expand[Expand.Length - 1].NameID = "accessory_" + Names.data.Length.ToString("000");
+                    nID = Names.data.Length;
+                    Expand[Expand.Length - 1].ID = Names.data.Length;
+                    Expand[Expand.Length - 1].Lines = new string[] { txtName.Text };
+                    Names.data = Expand;
+                    msgStream.Save(Names, msgFolder + "/proper_noun_costume_name_" + lang + ".msg");
 
-                        FileInfo info = new FileInfo(sysFolder + "/item/costume_" + items[i] + "_item.idb");
-                        int count = ((int)info.Length - 16) / 640;
+                    msg Descs = msgStream.Load2(msgFolder + "/proper_noun_accessory_info_" + lang + ".msg");
+                    Expand = new msgData[Descs.data.Length + 1];
+                    Array.Copy(Descs.data, Expand, Descs.data.Length);
+                    Expand[Expand.Length - 1].NameID = "accessory_eff_" + Descs.data.Length.ToString("000");
+                    dID = Descs.data.Length;
+                    Expand[Expand.Length - 1].ID = Descs.data.Length;
+                    Expand[Expand.Length - 1].Lines = new string[] { txtDesc.Text };
+                    Descs.data = Expand;
+                    msgStream.Save(Descs, msgFolder + "/proper_noun_costume_info_" + lang + ".msg");
 
+                    BinaryReader br = new BinaryReader(File.Open(sysFolder + "/item/accessory_item.idb", FileMode.Open));
+                    br.BaseStream.Seek(-640, SeekOrigin.End);
+                    byte[] idbData = br.ReadBytes(640);
+                    br.BaseStream.Seek(-640, SeekOrigin.End);
+                    int id = br.ReadInt16();
+                    br.Close();
 
-                        BinaryWriter bw = new BinaryWriter(File.Open(sysFolder + "/item/costume_" + items[i] + "_item.idb", FileMode.Open));
-                        bw.BaseStream.Seek(0, SeekOrigin.End);
-                        bw.Write(idbData);
-                        bw.BaseStream.Seek(-640, SeekOrigin.End);
-                        bw.Write((Int16)(idbID + 1));
-                        bw.BaseStream.Seek(2, SeekOrigin.Current);
-                        
-                        bw.Write((Int16)nID);
-                        bw.Write((Int16)dID);
-                        
-                        bw.BaseStream.Seek(8, SeekOrigin.Current);
-                        bw.Write(int.Parse(txtBuy.Text));
-                        bw.Write(int.Parse(txtSell.Text));
-                        bw.Write(getRaceLock());
-                        bw.BaseStream.Seek(8, SeekOrigin.Current);
-                        for (int j = 0; j < 25; j++)
-                            bw.Write((float)1);
+                    FileInfo info = new FileInfo(sysFolder + "/item/accessory_item.idb");
+                    int count = ((int)info.Length - 16) / 640;
 
-                        bw.BaseStream.Seek(476, SeekOrigin.Current);
-                        bw.Write((int)lstID.SelectedItem);
-                        bw.BaseStream.Seek(8, SeekOrigin.Begin);
-                        bw.Write(count + 1);
-                        bw.Close();
-                    }
+                    
+
+                    BinaryWriter bw = new BinaryWriter(File.Open(sysFolder + "/item/accessory_item.idb", FileMode.Open));
+                    bw.BaseStream.Seek(0, SeekOrigin.End);
+                    bw.Write(idbData);
+                    bw.BaseStream.Seek(-640, SeekOrigin.End);
+                    bw.Write((Int16)(id + 1));
+                    bw.BaseStream.Seek(2, SeekOrigin.Current);
+
+                    bw.Write((Int16)nID);
+                    bw.Write((Int16)dID);
+
+                    bw.BaseStream.Seek(8, SeekOrigin.Current);
+                    bw.Write(int.Parse(txtBuy.Text));
+                    bw.Write(int.Parse(txtSell.Text));
+                    bw.Write(getRaceLock());
+                    bw.BaseStream.Seek(8, SeekOrigin.Current);
+                    for (int j = 0; j < 25; j++)
+                        bw.Write((float)1);
+
+                    bw.BaseStream.Seek(476, SeekOrigin.Current);
+                    bw.Write((int)lstID.SelectedItem);
+                    bw.BaseStream.Seek(8, SeekOrigin.Begin);
+                    bw.Write(count + 1);
+                    bw.Close();
 
                 }
 
